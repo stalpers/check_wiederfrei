@@ -17,10 +17,7 @@ for x in f:
 
 ergebnis = []
 
-<<<<<<< HEAD
 
-=======
->>>>>>> d3865d3... initial
 print("[*] Checking Status")
 for finding in re.findall(r'data-expanded-url="((http|https)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,3})"', html_string):
     url = "www." + finding[0].replace("http://","")
@@ -31,13 +28,8 @@ for finding in re.findall(r'data-expanded-url="((http|https)\:\/\/[a-zA-Z0-9\-\.
         sys.stdout.flush()
         time.sleep(0.5)
 
-<<<<<<< HEAD
     print("¦")
     print("bla")
-=======
-    print ("¦")
-
->>>>>>> d3865d3... initial
     l = url + ";"
     if res.status_code == 200:
         print("[+] " + finding[0] + " - ", end="")
