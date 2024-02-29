@@ -6,7 +6,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+data/*.csv
 # Distribution / packaging
 .Python
 env/
@@ -106,3 +106,4 @@ com_crashlytics_export_strings.xml
 crashlytics.properties
 crashlytics-build.properties
 
+/seen_domains.pkl
