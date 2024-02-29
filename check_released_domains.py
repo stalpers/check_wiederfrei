@@ -1,9 +1,7 @@
 import os
-import pprint
 from collections import namedtuple
 import pickle
 import logging
-import requests
 import requests
 import csv
 from tabulate import tabulate
@@ -35,19 +33,29 @@ def search_top10_rank(domain_name, top10_data: list[Top10DB]) -> Top10Results | 
 
 def read_alexa_data(filename):
     alexa_l = []
-    with open(filename, 'r') as file:  # @TODO: check for file exists
-        csv_reader = csv.reader(file)
-        alexa_l = [AlexaDB(rank=row[0], domain=row[1]) for row in csv_reader]
+    try:
+        with open(filename, 'r') as file:
+            csv_reader = csv.reader(file)
+            alexa_l = [AlexaDB(rank=row[0], domain=row[1]) for row in csv_reader]
+    except Exception as e:
+        logger.error(f'File {filename} could not be opened - Did you copy the CSV file to the data directory?')
+        logger.error(f'{e}')
+        exit(99)
     return alexa_l
 
 
 def read_top10_data(filename):
     result = []
-    with open(filename, 'r') as file:  # @TODO: check for file exists
-        csv_reader = csv.reader(file)
-        # Skip the header
-        next(csv_reader)
-        result = [Top10DB(rank=row[0], domain=row[1], open_rank=row[2]) for row in csv_reader]
+    try:
+        with open(filename, 'r') as file:
+            csv_reader = csv.reader(file)
+            # Skip the header
+            next(csv_reader)
+            result = [Top10DB(rank=row[0], domain=row[1], open_rank=row[2]) for row in csv_reader]
+    except Exception as e:
+        logger.error(f'File {filename} could not be opened - Did you copy the CSV file to the data directory?')
+        logger.error(f'{e}')
+        exit(99)
     return result
 
 
