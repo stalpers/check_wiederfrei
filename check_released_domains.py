@@ -6,6 +6,7 @@ import logging
 import requests
 import requests
 import csv
+from tabulate import tabulate
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -103,12 +104,19 @@ if __name__ == "__main__":
     logger.info("Getting domain information from Mastodon")
     domains = get_domains()
 
-    for domain in domains:
-        a = search_alexa_rank(domain_name=domain, alexa_data=alexa)
-        t = search_top10_rank(domain_name=domain, top10_data=top10)
-        r = 'not available'
-        o = 'not available'
-        if t is not None:
-            r = t.rank
-            o = t.open_rank
-        print(f'{domain}\t{a}\t{r}\t{o}')
+    if len(domains) == 0:
+        logger.info("No new domains found ")
+    else:
+        logger.info("Compiling results")
+        result_table=[]
+        for domain in domains:
+            a = search_alexa_rank(domain_name=domain, alexa_data=alexa)
+            t = search_top10_rank(domain_name=domain, top10_data=top10)
+            r = 'not available'
+            o = 'not available'
+            if t is not None:
+                r = t.rank
+                o = t.open_rank
+            result_table.append([domain,a,r,o])
+        headers=['Domain','Alexa Rank','Top10M Rank','Open Page Rank']
+        print(tabulate(result_table, headers, tablefmt="outline"))
