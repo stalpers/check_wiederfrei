@@ -1,6 +1,6 @@
 # NewDomains #
 
-Get list of .ch & .li domains that got available recently domains from the Mastodon feed @wiederfrei and check their rank using Alexa Top1000 and Top 10Million Sites$
+Get list of .ch & .li domains that that have just become available again from the Mastodon feed @wiederfrei and check their rank using Alexa Top1000 and Top 10Million Sites$
 
 Download and unzip the data files to the data directory 
 
