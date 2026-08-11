@@ -107,3 +107,10 @@ crashlytics.properties
 crashlytics-build.properties
 
 /seen_domains.pkl
+
+# wiederfrei
+.env
+rules.yaml
+*.db
+*.db-journal
+*.db-wal

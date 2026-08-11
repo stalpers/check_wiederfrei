@@ -1,0 +1,81 @@
+# wiederfrei rules
+#
+# Copy to rules.yaml and edit. Credentials never belong in this file -- SMTP settings
+# come from the environment (see .env.example).
+
+defaults:
+  tlds: [ch]
+  notify: [email]
+
+rules:
+  # The 3-4 character sweep. 36^3 + 36^4 = 1,726,272 candidate names for .ch.
+  - name: "Short .ch domains (3-4 chars)"
+    type: length
+    enabled: true
+    tlds: [ch]
+    min_length: 3
+    max_length: 4
+    charset: alnum        # alpha | alnum | alnum_hyphen
+    notify: [email]
+
+  # Letters-only 3-character names, alerted separately so they stand out from the
+  # much larger 4-character space above. Overlapping rules are fine: a domain that
+  # matches both is checked once and every matching rule is named in the alert.
+  - name: "Three-letter .ch domains (a-z)"
+    type: length
+    enabled: true
+    tlds: [ch]
+    min_length: 3
+    max_length: 3
+    charset: alpha
+    notify: [email]
+
+  # Phase 2 will add regex rules here, e.g.:
+  #
+  # - name: "Swiss city names"
+  #   type: regex
+  #   tlds: [ch]
+  #   pattern: '^(zuerich|basel|bern|luzern|genf)$'
+
+# --- operational settings -------------------------------------------------------
+
+state_path: wiederfrei.db
+
+dns:
+  # Your resolver, not the network, is the limit. Raising concurrency past what it can
+  # serve does not buy throughput -- it just converts answers into timeouts, and a
+  # timeout is an "unknown" that has to be swept again next run.
+  #
+  # Measured against a stock container resolver (1,000 three-letter .ch names):
+  #     concurrency  25  ->  20 names/s,   5% unknown
+  #     concurrency  75  ->  26 names/s,  15% unknown
+  #     concurrency 150  ->  29 names/s,  28% unknown
+  #     concurrency 300  ->        --  ,  45% unknown
+  #
+  # Tune by watching the "unknown" count the sweep logs: if it is more than a few
+  # percent, lower this. A local caching resolver (unbound, dnsmasq) is worth far more
+  # than a high concurrency here -- see the README.
+  concurrency: 50
+  timeout: 3.0          # seconds per query
+  lifetime: 6.0         # seconds total per name including retries
+  resolvers: []         # empty = system resolvers
+
+rdap:
+  # Switch serves RDAP for both .ch and .li from the same host.
+  endpoints:
+    ch: https://rdap.nic.ch
+    li: https://rdap.nic.ch
+  rate_limit_per_second: 2.0   # deliberately conservative; do not raise without reason
+  max_per_run: 2000            # hard cap on RDAP calls in a single run
+  timeout: 15.0
+  max_retries: 4
+  recheck_after_days: 7        # how stale an RDAP verdict may get before re-querying
+  contact: ""                  # your email, added to the User-Agent so the registry can
+                               # reach you instead of silently blocking
+
+ranking:
+  # Entirely optional enrichment. Leave disabled unless you have the CSVs; short names
+  # are almost never in either list, and the 10M-row file is slow to load.
+  enabled: false
+  umbrella_csv: data/umbrella-top-1m.csv
+  top10m_csv: data/top10milliondomains.csv
