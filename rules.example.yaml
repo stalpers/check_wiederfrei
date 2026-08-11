@@ -1,0 +1,125 @@
+# wiederfrei rules
+#
+# Copy to rules.yaml and edit. Credentials never belong in this file -- SMTP settings
+# come from the environment (see .env.example).
+
+defaults:
+  tlds: [ch]
+  notify: [email]
+
+rules:
+  # The 3-4 character sweep. 36^3 + 36^4 = 1,726,272 candidate names for .ch.
+  - name: "Short .ch domains (3-4 chars)"
+    type: length
+    enabled: true
+    tlds: [ch]
+    min_length: 3
+    max_length: 4
+    charset: alnum        # alpha | alnum | alnum_hyphen
+    notify: [email]
+
+  # Letters-only 3-character names, alerted separately so they stand out from the
+  # much larger 4-character space above. Overlapping rules are fine: a domain that
+  # matches both is checked once and every matching rule is named in the alert.
+  - name: "Three-letter .ch domains (a-z)"
+    type: length
+    enabled: true
+    tlds: [ch]
+    min_length: 3
+    max_length: 3
+    charset: alpha
+    notify: [email]
+
+  # Phase 2 will add regex rules here, e.g.:
+  #
+  # - name: "Swiss city names"
+  #   type: regex
+  #   tlds: [ch]
+  #   pattern: '^(zuerich|basel|bern|luzern|genf)$'
+
+# --- operational settings -------------------------------------------------------
+
+state_path: wiederfrei.db
+
+dns:
+  # "authoritative" asks the .ch nameservers directly; "recursive" goes through a
+  # resolver. Authoritative is the default because a resolver cache cannot help here --
+  # the sweep asks about ~1.7M *unique* names, so essentially every query is a cache
+  # miss that pays a full recursion down to the same servers we could ask directly.
+  #
+  # If your network transparently intercepts UDP/53 (many container hosts and corporate
+  # networks do), authoritative mode is detected as unusable at startup and the tool
+  # falls back to recursive automatically, with an error in the log explaining why.
+  # Results stay correct either way; only speed changes.
+  mode: authoritative
+
+  # Authoritative mode: total queries/second across all of the TLD's servers.
+  # Deliberately modest. DNS carries no User-Agent, so rate is the only politeness
+  # lever available. Note this does not increase load on the .ch servers relative to
+  # recursive mode -- with unique names they receive the queries either way.
+  qps: 100
+  nameservers: []       # empty = discover the TLD's servers automatically
+  max_retries: 1        # a failed query is retried against a *different* server
+
+  # Recursive mode only. Your resolver, not the network, is the limit: raising
+  # concurrency past what it can serve just converts answers into timeouts, and a
+  # timeout is an "unknown" that has to be swept again next run.
+  #
+  # Measured against a stock container resolver (1,000 three-letter .ch names):
+  #     concurrency  25  ->  20 names/s,   5% unknown
+  #     concurrency  75  ->  26 names/s,  15% unknown
+  #     concurrency 150  ->  29 names/s,  28% unknown
+  #     concurrency 300  ->        --  ,  45% unknown
+  #
+  # Tune by watching the "unknown" count the sweep logs: if it is more than a few
+  # percent, lower this. A local caching resolver (unbound, dnsmasq) is worth far more
+  # than a high concurrency here -- see the README.
+  concurrency: 50
+  timeout: 3.0          # seconds per query
+  lifetime: 6.0         # seconds total per name including retries
+  resolvers: []         # empty = system resolvers
+
+zone:
+  # OPTIONAL, OFF BY DEFAULT. Replaces the whole DNS tier with a single zone transfer,
+  # and the diff between consecutive snapshots is a true "recently released" feed --
+  # see `wiederfrei zone-diff`.
+  #
+  # READ BEFORE ENABLING. Switch publishes the .ch and .li zone files as open data,
+  # restricted to "combating cybercrime, scientific and social research or for other
+  # purposes in the public interest", and asks that the zone be downloaded no more than
+  # once every 24 hours. See https://www.switch.ch/open-data/
+  #
+  # Domain hunting plausibly does not fall within those purposes. Whether your use
+  # qualifies is your call, not this tool's, which is why enabling takes two flags.
+  # Note the public antoinet/chzone mirror restates the same terms -- taking the data
+  # from a mirror does not change the obligation.
+  enabled: false
+  acknowledge_terms: false
+
+  tld: ch
+  source: axfr                    # axfr | file
+  server: zonedata.switch.ch      # for source: axfr; TSIG key comes from the environment
+  path: data/ch_zone.txt          # for source: file
+  format: names                   # names (one domain per line) | zonefile
+  snapshot_dir: data/zone         # snapshots live here; the diff is taken between them
+  min_transfer_interval_hours: 24 # enforced in code, not just documented
+
+rdap:
+  # Switch serves RDAP for both .ch and .li from the same host.
+  endpoints:
+    ch: https://rdap.nic.ch
+    li: https://rdap.nic.ch
+  rate_limit_per_second: 2.0   # deliberately conservative; do not raise without reason
+  max_per_run: 2000            # hard cap on RDAP calls in a single run
+  timeout: 15.0
+  max_retries: 4
+  recheck_after_days: 7        # how stale an RDAP verdict may get before re-querying
+  contact: ""                  # your email, added to the User-Agent so the registry can
+                               # reach you instead of silently blocking
+
+ranking:
+  # Entirely optional enrichment. Leave disabled unless you have the CSVs; short names
+  # are almost never in either list, and the 10M-row file is slow to load.
+  enabled: false
+  umbrella_csv: data/umbrella-top-1m.csv
+  top10m_csv: data/top10milliondomains.csv
