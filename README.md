@@ -35,9 +35,15 @@ polite:
 1. **DNS `NS` sweep** — cheap, covers everything. A name with `NS` records is definitely
    registered, so it is ruled out. Absence of `NS` proves nothing (a name can be
    registered without being delegated), so it is only ever a referral to tier 2.
+   Optionally replaced by a zone-file lookup — see [Going faster](#going-faster).
 2. **RDAP `HEAD`** — authoritative, rate-limited. `HEAD https://rdap.nic.ch/domain/<name>`
    returns `200` for registered and `404` for not registered. This is the documented
    Switch mechanism for testing registration without retrieving registration data.
+
+Only the RDAP **status code** is trusted. Switch redacts nameservers and events from
+anonymous callers — `nic.ch` reports `"status": ["inactive"]` and `"nameservers": []`
+despite plainly having both — so the response body says nothing reliable about delegation
+or expiry.
 
 Verdicts are cached in SQLite with a TTL, so steady-state RDAP volume stays in the low
 hundreds per run: only names that newly lost delegation, names already known available,
@@ -98,6 +104,7 @@ wiederfrei sweep                    # the real thing
 wiederfrei notify-test              # send a fixture alert to check SMTP and formatting
 wiederfrei alerts                   # what has already been reported
 wiederfrei stats                    # state and recent runs
+wiederfrei zone-diff --refresh      # names that left the .ch zone (zone backend only)
 ```
 
 Useful flags: `--rule "name"` to run one rule, `--skip-dns` to re-run only the RDAP tier
@@ -128,18 +135,58 @@ Measured against that resolver (1,000 three-letter `.ch` names):
 Throughput plateaus around 20 *useful* answers/s while the error rate climbs — extra
 concurrency past what the resolver can serve just converts answers into timeouts.
 
-**Run a local caching resolver** (`unbound`, `dnsmasq`) and point `dns.resolvers` at it.
-That is worth far more than a high concurrency setting. Then tune by watching the
-`unknown` count the sweep logs: if it is more than a few percent, lower `dns.concurrency`.
-
-Why the resolver dominates: with 1.7M *unique* names the cache hit rate is effectively zero,
-so every query pays a full recursion to the `.ch` authoritative servers. Querying those
-servers directly instead would remove that overhead entirely — see
-[BACKLOG.md](BACKLOG.md#performance-direct-to-authoritative-dns-probe), which has a worked
-design for it.
+Those are `dns.mode: recursive` numbers, and they are the reason the default is not
+recursive — see below.
 
 If you only care about three-letter names, note that they are just 46,656 of the 1.73M —
-cheap enough to sweep nightly today with `--rule`.
+cheap enough to sweep nightly even at that rate, with `--rule`.
+
+## Going faster
+
+### Skip the recursion (default)
+
+With 1.7M *unique* names a resolver cache never helps: essentially every query is a miss
+that pays a full recursion down to the `.ch` authoritative servers — the same servers we
+could simply ask. `dns.mode: authoritative` (the default) queries `a.nic.ch` and its peers
+directly, one UDP round trip per name.
+
+This does not increase the load those servers see. With unique names they receive the
+queries either way; the recursion in between is pure overhead.
+
+Pace it with `dns.qps` (default 100). DNS carries no `User-Agent`, so rate is the only
+politeness lever there is.
+
+**If your network intercepts DNS, this is detected and handled.** Many container hosts and
+corporate networks transparently redirect UDP/53 to their own resolver, which answers
+`SERVFAIL` to the `RD=0` queries this mode sends — silently turning an entire sweep into
+`unknown`. At startup the probe checks that the servers really answer authoritatively
+(`AA=1`, no `RA`); if not, it logs an error naming the culprit and falls back to recursive
+mode. Correctness is never affected, only speed.
+
+### Or skip the DNS tier entirely
+
+`zone.enabled` replaces the whole sweep with one zone transfer, turning tier 1 into a set
+membership test. `wiederfrei zone-diff` then shows every name that **left** the zone since
+the last snapshot — a genuine "recently released" feed, which no amount of enumeration can
+give you.
+
+⚠️ **Read the terms before enabling.** Switch publishes the `.ch`/`.li` zones as open data
+restricted to *"combating cybercrime, scientific and social research or for other purposes
+in the public interest"*, and asks for at most one transfer per 24h (enforced in code
+here). Domain hunting plausibly is not among those purposes. Whether your use qualifies is
+your call, which is why it takes two separate flags — `zone.enabled` **and**
+`zone.acknowledge_terms` — and refuses to run otherwise. The public
+[`antoinet/chzone`](https://github.com/antoinet/chzone) mirror restates the same terms;
+taking the data from a mirror does not change the obligation.
+
+Needs a TSIG key from Switch, supplied via `SWITCH_ZONE_TSIG_NAME` / `SWITCH_ZONE_TSIG_KEY`
+in the environment. `zone.source: file` reads a snapshot from disk instead.
+
+### What will not work
+
+Expiry-driven scheduling — checking each name only as it approaches its expiry date —
+would beat both of the above. It is not possible: anonymous `.ch` RDAP returns
+`"events": []`, so no expiry date is exposed.
 
 Timeouts are safe — an `unknown` is never reported as available, and the name is simply
 swept again on the next run — but a high rate means you are re-doing work.

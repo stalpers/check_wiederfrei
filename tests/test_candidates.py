@@ -60,8 +60,22 @@ class TestNormalisation:
     def test_lowercases(self):
         assert normalise_domain("ExAmPle.CH") == "example.ch"
 
-    def test_strips_www_and_trailing_dot(self):
-        assert normalise_domain("www.example.ch.") == "example.ch"
+    def test_strips_trailing_dot(self):
+        assert normalise_domain("example.ch.") == "example.ch"
+
+    def test_keeps_www_by_default(self):
+        """'www' is a registrable three-letter label: www.ch is a real domain, and
+        stripping it silently turned it into 'ch' -- so the zone tier reported it
+        undelegated and the CLI rejected it as not fully qualified."""
+        assert normalise_domain("www.ch") == "www.ch"
+        assert normalise_domain("www.example.ch") == "www.example.ch"
+
+    def test_strips_www_only_when_asked(self):
+        assert normalise_domain("www.example.ch.", strip_www=True) == "example.ch"
+
+    def test_strip_www_never_eats_the_whole_name(self):
+        """Even opted in, stripping must not reduce a registrable name to its TLD."""
+        assert normalise_domain("www.ch", strip_www=True) == "www.ch"
 
     def test_idn_to_punycode(self):
         assert normalise_domain("zürich.ch") == "xn--zrich-kva.ch"

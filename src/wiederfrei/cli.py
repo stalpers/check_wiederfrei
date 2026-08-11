@@ -138,6 +138,36 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_zone_diff(args: argparse.Namespace) -> int:
+    """Show which names left the zone since the previous snapshot — the drop feed."""
+    from .zone import TERMS, ZoneBackend
+
+    cfg = load_config(args.config)
+    if not cfg.zone.enabled:
+        raise WiederfreiError(
+            "the zone backend is disabled. Set zone.enabled and zone.acknowledge_terms "
+            "in your config only if your use qualifies.\n\n" + TERMS
+        )
+
+    backend = ZoneBackend(cfg.zone)
+    if args.refresh:
+        backend.refresh(force=args.force)
+
+    removed, added = backend.snapshot.diff()
+    if not removed and not added:
+        print("No difference between the current and previous zone snapshots.")
+        print("(Two snapshots are needed; run with --refresh on separate days.)")
+        return 0
+
+    print(f"{len(removed)} name(s) left the zone, {len(added)} joined.\n")
+    print("Left the zone (candidates for release — RDAP still decides):")
+    rows = [[d, intrinsic_score(d.rsplit('.', 1)[0])] for d in sorted(removed)[: args.limit]]
+    print(tabulate(rows, headers=["Domain", "Intrinsic"], tablefmt="outline"))
+    if len(removed) > args.limit:
+        print(f"... and {len(removed) - args.limit} more")
+    return 0
+
+
 def cmd_notify_test(args: argparse.Namespace) -> int:
     """Send a fixture alert so you can confirm delivery and rule attribution."""
     cfg = load_config(args.config)
@@ -244,6 +274,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_stats = sub.add_parser("stats", help="show state and recent runs")
     p_stats.set_defaults(func=cmd_stats)
+
+    p_zone = sub.add_parser(
+        "zone-diff", help="names that left the .ch zone since the last snapshot"
+    )
+    p_zone.add_argument("--refresh", action="store_true",
+                        help="fetch a fresh snapshot first (rotates the current one)")
+    p_zone.add_argument("--force", action="store_true",
+                        help="with --refresh, ignore the once-per-24h interval")
+    p_zone.add_argument("--limit", type=int, default=50)
+    p_zone.set_defaults(func=cmd_zone_diff)
 
     p_test = sub.add_parser("notify-test", help="send a fixture alert to check delivery")
     p_test.add_argument("--via", action="append", default=None,

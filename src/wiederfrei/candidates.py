@@ -24,15 +24,21 @@ CHARSETS: dict[str, str] = {
 }
 
 
-def normalise_domain(name: str) -> str:
+def normalise_domain(name: str, *, strip_www: bool = False) -> str:
     """Return the canonical comparison form of a domain name.
 
-    Lowercased, ``www.`` stripped, trailing dot stripped, and IDN converted to its
-    punycode A-label so that Unicode input (``zürich.ch``) compares equal to the
-    punycode form (``xn--zrich-kva.ch``) used in registry and rank data.
+    Lowercased, trailing dot stripped, and IDN converted to its punycode A-label so that
+    Unicode input (``zürich.ch``) compares equal to the punycode form
+    (``xn--zrich-kva.ch``) used in registry and rank data.
+
+    ``strip_www`` removes a leading ``www.``. It is **off by default and must stay that
+    way** for anything that handles registrable names: ``www`` is itself a perfectly
+    valid three-letter label, so ``www.ch`` is a real domain that stripping would turn
+    into ``ch``. Only rank lookups want it, where ``www.example.com`` and
+    ``example.com`` are the same site.
     """
     s = name.strip().lower().rstrip(".")
-    if s.startswith("www."):
+    if strip_www and s.startswith("www.") and s.count(".") > 1:
         s = s[4:]
     if not s or s.isascii():
         return s

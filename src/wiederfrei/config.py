@@ -19,6 +19,8 @@ from .rules import Rule, build_rule
 
 DEFAULT_CONFIG_PATH = Path("rules.yaml")
 
+DNS_MODES = frozenset({"authoritative", "recursive"})
+
 #: Switch serves RDAP for both .ch and .li from the same host.
 DEFAULT_RDAP_ENDPOINTS = {
     "ch": "https://rdap.nic.ch",
@@ -28,12 +30,25 @@ DEFAULT_RDAP_ENDPOINTS = {
 
 @dataclass(slots=True)
 class DnsConfig:
+    # "authoritative" queries the TLD's own nameservers directly; "recursive" goes through
+    # a resolver. Authoritative is the default because with ~1.7M unique names a resolver
+    # cache never helps, so recursion is pure overhead -- see dns_probe.py.
+    mode: str = "authoritative"
+
     # Conservative on purpose: past what the resolver can serve, extra concurrency
     # produces timeouts rather than throughput. See rules.example.yaml for measurements.
     concurrency: int = 50
     timeout: float = 3.0
     lifetime: float = 6.0
+
+    # Recursive mode: resolvers to ask. Empty = system resolvers.
     resolvers: list[str] = field(default_factory=list)
+
+    # Authoritative mode: total queries/second budget, shared across the TLD's servers,
+    # and an optional override for the server list (empty = discover it).
+    qps: float = 100.0
+    nameservers: list[str] = field(default_factory=list)
+    max_retries: int = 1
 
 
 @dataclass(slots=True)
@@ -58,6 +73,24 @@ class RdapConfig:
             raise ConfigError(
                 f"no RDAP endpoint configured for .{tld}; add one under rdap.endpoints"
             ) from None
+
+
+@dataclass(slots=True)
+class ZoneConfig:
+    """Optional zone-file tier-1. Off by default and gated on an explicit acknowledgement
+    of Switch's usage terms -- see ``wiederfrei.zone.TERMS``."""
+
+    enabled: bool = False
+    acknowledge_terms: bool = False
+    tld: str = "ch"
+    source: str = "axfr"                  # axfr | file
+    server: str = "zonedata.switch.ch"
+    path: Path = Path("data/ch_zone.txt")
+    format: str = "names"                 # names | zonefile
+    snapshot_dir: Path = Path("data/zone")
+    min_transfer_interval_hours: int = 24
+    timeout: float = 30.0
+    lifetime: float = 900.0
 
 
 @dataclass(slots=True)
@@ -88,6 +121,7 @@ class Config:
     dns: DnsConfig
     rdap: RdapConfig
     ranking: RankingConfig
+    zone: ZoneConfig
     state_path: Path
     source_path: Path
 
@@ -137,13 +171,23 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
 
     dns_raw = _as_mapping(raw.get("dns"), "dns")
     dns = DnsConfig(
-        concurrency=int(dns_raw.get("concurrency", 300)),
+        mode=str(dns_raw.get("mode", "authoritative")).lower(),
+        concurrency=int(dns_raw.get("concurrency", 50)),
         timeout=float(dns_raw.get("timeout", 3.0)),
         lifetime=float(dns_raw.get("lifetime", 6.0)),
         resolvers=[str(r) for r in dns_raw.get("resolvers", [])],
+        qps=float(dns_raw.get("qps", 100.0)),
+        nameservers=[str(n) for n in dns_raw.get("nameservers", [])],
+        max_retries=int(dns_raw.get("max_retries", 1)),
     )
     if dns.concurrency < 1:
         raise ConfigError("dns.concurrency must be at least 1")
+    if dns.mode not in DNS_MODES:
+        raise ConfigError(
+            f"dns.mode must be one of {sorted(DNS_MODES)}, got {dns.mode!r}"
+        )
+    if dns.qps <= 0:
+        raise ConfigError("dns.qps must be greater than 0")
 
     rdap_raw = _as_mapping(raw.get("rdap"), "rdap")
     endpoints = dict(DEFAULT_RDAP_ENDPOINTS)
@@ -185,6 +229,25 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         enabled=bool(rank_raw.get("enabled", False)),
     )
 
+    zone_raw = _as_mapping(raw.get("zone"), "zone")
+    zone = ZoneConfig(
+        enabled=bool(zone_raw.get("enabled", False)),
+        acknowledge_terms=bool(zone_raw.get("acknowledge_terms", False)),
+        tld=str(zone_raw.get("tld", "ch")).lower().lstrip("."),
+        source=str(zone_raw.get("source", "axfr")).lower(),
+        server=str(zone_raw.get("server", "zonedata.switch.ch")),
+        path=Path(str(zone_raw.get("path", "data/ch_zone.txt"))),
+        format=str(zone_raw.get("format", "names")).lower(),
+        snapshot_dir=Path(str(zone_raw.get("snapshot_dir", "data/zone"))),
+        min_transfer_interval_hours=int(zone_raw.get("min_transfer_interval_hours", 24)),
+        timeout=float(zone_raw.get("timeout", 30.0)),
+        lifetime=float(zone_raw.get("lifetime", 900.0)),
+    )
+    if zone.source not in {"axfr", "file"}:
+        raise ConfigError(f"zone.source must be 'axfr' or 'file', got {zone.source!r}")
+    if zone.format not in {"names", "zonefile"}:
+        raise ConfigError(f"zone.format must be 'names' or 'zonefile', got {zone.format!r}")
+
     state_path = Path(str(raw.get("state_path", "wiederfrei.db")))
 
     return Config(
@@ -192,6 +255,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         dns=dns,
         rdap=rdap,
         ranking=ranking,
+        zone=zone,
         state_path=state_path,
         source_path=path,
     )

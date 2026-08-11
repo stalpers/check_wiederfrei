@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from .candidates import Candidate, iter_candidates, matching_rules
 from .config import Config
-from .dns_probe import NsProbe, NsStatus
+from .dns_probe import NsStatus, build_probe
 from .notify.base import Alert, Finding, Notifier
 from .ranking import RankIndex
 from .rdap import RdapClient, RdapStatus
@@ -60,9 +60,17 @@ async def run_sweep(
     if skip_dns:
         logger.info("Skipping DNS sweep; using cached NS status from previous runs")
     else:
-        probe = NsProbe(cfg.dns)
+        if cfg.zone.enabled:
+            from .zone import ZoneBackend
+
+            probe = ZoneBackend(cfg.zone, cfg.dns.concurrency)
+            mode = "zone file"
+        else:
+            probe = build_probe(cfg.dns)
+            mode = f"{cfg.dns.mode} DNS"
         logger.info(
-            "DNS sweep starting over %s candidate names",
+            "Tier 1 starting (%s) over %s candidate names",
+            mode,
             f"{sum(r.candidate_count() or 0 for r in rules):,}" if limit is None else f"<={limit:,}",
         )
         stats = await probe.sweep(
@@ -74,7 +82,7 @@ async def run_sweep(
         report.dns_no_delegation = stats.no_delegation
         report.dns_unknown = stats.unknown
         logger.info(
-            "DNS sweep done: %d checked, %d delegated, %d without delegation, %d unknown",
+            "Tier 1 done: %d checked, %d delegated, %d without delegation, %d unknown",
             stats.checked, stats.delegated, stats.no_delegation, stats.unknown,
         )
 

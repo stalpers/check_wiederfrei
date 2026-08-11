@@ -104,7 +104,7 @@ class RankIndex:
                     rank = int(row[0])
                 except ValueError:
                     continue  # tolerates a header row if the format ever changes
-                index.setdefault(normalise_domain(row[1]), rank)
+                index.setdefault(normalise_domain(row[1], strip_www=True), rank)
         logger.info("Loaded %d Umbrella rows", len(index))
         return index
 
@@ -131,7 +131,7 @@ class RankIndex:
                         opr = float(row[2])
                     except ValueError:
                         opr = None
-                index.setdefault(normalise_domain(row[1]), (rank, opr))
+                index.setdefault(normalise_domain(row[1], strip_www=True), (rank, opr))
         logger.info("Loaded %d Top-10M rows", len(index))
         return index
 
@@ -146,7 +146,7 @@ class RankIndex:
         if self._top10m is None:
             self._top10m = self._load_top10m()
 
-        key = normalise_domain(domain)
+        key = normalise_domain(domain, strip_www=True)
         top = self._top10m.get(key)
         return RankInfo(
             umbrella_rank=self._umbrella.get(key),

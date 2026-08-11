@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from wiederfrei.config import Config, DnsConfig, RankingConfig, RdapConfig
+from wiederfrei.config import Config, DnsConfig, RankingConfig, RdapConfig, ZoneConfig
 from wiederfrei.dns_probe import NsStatus
 from wiederfrei.errors import NotifyError
 from wiederfrei.pipeline import run_sweep
@@ -38,9 +38,12 @@ def cfg(tmp_path):
     )
     return Config(
         rules=[rule],
-        dns=DnsConfig(concurrency=8),
+        # Pinned to recursive so fake_dns can patch NsProbe.status. The authoritative
+        # probe is exercised directly in tests/test_dns_probe.py.
+        dns=DnsConfig(concurrency=8, mode="recursive"),
         rdap=RdapConfig(rate_limit_per_second=1000.0, max_per_run=100, max_retries=1),
         ranking=RankingConfig(),
+        zone=ZoneConfig(),
         state_path=tmp_path / "state.db",
         source_path=tmp_path / "rules.yaml",
     )
