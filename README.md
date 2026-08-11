@@ -105,10 +105,18 @@ against cached DNS results, `-c path` for a different config.
 
 ## Sizing the sweep — read this before the first run
 
-The 3–4 character `a-z0-9` space for `.ch` is **1,726,272 names**. How long a full sweep
-takes is set almost entirely by your DNS resolver.
+The 3–4 character `a-z0-9` space for `.ch` is **1,726,272 names**, of which the 4-character
+part is 1,679,616. How long a sweep takes is set almost entirely by your DNS resolver.
 
-Measured against a stock container resolver (1,000 three-letter `.ch` names):
+Two things to be clear about before the numbers below:
+
+- **This is a bootstrap cost, not a nightly one.** The first pass has to establish the state
+  of the whole space. After that, RDAP verdicts are cached and only a small queue is
+  re-checked each run.
+- **The measurements below are close to a worst case.** They were taken against a saturated
+  stock container resolver with no useful cache. Your hardware will likely do better.
+
+Measured against that resolver (1,000 three-letter `.ch` names):
 
 | `dns.concurrency` | Throughput | Timed out (`unknown`) |
 |---|---|---|
@@ -118,12 +126,20 @@ Measured against a stock container resolver (1,000 three-letter `.ch` names):
 | 300 | — | 45% |
 
 Throughput plateaus around 20 *useful* answers/s while the error rate climbs — extra
-concurrency past what the resolver can serve just converts answers into timeouts. At that
-rate a full sweep takes over a day.
+concurrency past what the resolver can serve just converts answers into timeouts.
 
 **Run a local caching resolver** (`unbound`, `dnsmasq`) and point `dns.resolvers` at it.
 That is worth far more than a high concurrency setting. Then tune by watching the
 `unknown` count the sweep logs: if it is more than a few percent, lower `dns.concurrency`.
+
+Why the resolver dominates: with 1.7M *unique* names the cache hit rate is effectively zero,
+so every query pays a full recursion to the `.ch` authoritative servers. Querying those
+servers directly instead would remove that overhead entirely — see
+[BACKLOG.md](BACKLOG.md#performance-direct-to-authoritative-dns-probe), which has a worked
+design for it.
+
+If you only care about three-letter names, note that they are just 46,656 of the 1.73M —
+cheap enough to sweep nightly today with `--rule`.
 
 Timeouts are safe — an `unknown` is never reported as available, and the name is simply
 swept again on the next run — but a high rate means you are re-doing work.
